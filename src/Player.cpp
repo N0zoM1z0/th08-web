@@ -2830,7 +2830,11 @@ i32 __fastcall FUN_004501b0(Player *player, PlayerShot *slot, i32 value, u8 *ent
     {
         player->FUN_0044fb70(reinterpret_cast<u8 *>(slot), entry);
         *reinterpret_cast<f32 *>(reinterpret_cast<u8 *>(slot) + 0x450) =
+#ifdef TH08_MODERN_WEB
+            g_Rng.GetRandomF32Signed() * ZUN_PI / 48.0f - ZUN_PI / 2.0f;
+#else
             g_Rng.GetRandomF32() * ZUN_PI / 48.0f - ZUN_PI / 2.0f;
+#endif
         reinterpret_cast<Float3 *>(&slot->velocity)->FromAngleMagnitude(
             *reinterpret_cast<f32 *>(reinterpret_cast<u8 *>(slot) + 0x450),
             *reinterpret_cast<f32 *>(entry + 0x18));

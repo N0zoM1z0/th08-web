@@ -14,6 +14,11 @@ namespace th08
 ZunBool IsDisableResourceReload();
 f32 __stdcall FUN_00408fc0(f32 value0, f32 value1, f32 value2, f32 value3, f32 time);
 u8 MixColors(u8 color1, u8 color2);
+#ifdef TH08_MODERN_WEB
+#define TH08_STAGE_BACKGROUND_VISIBLE() (!g_Gui.FUN_00437d87())
+#else
+#define TH08_STAGE_BACKGROUND_VISIBLE() (!g_Gui.IsDialogPresent())
+#endif
 
 struct RawStageHeader
 {
@@ -767,7 +772,7 @@ ChainCallbackResult Background::OnDrawHighPrio(Background *background)
     reinterpret_cast<ZunColor *>(reinterpret_cast<u8 *>(background) + 0x6468)->g = 0x80;
     reinterpret_cast<ZunColor *>(reinterpret_cast<u8 *>(background) + 0x6468)->b = 0x80;
 
-    if (*reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(background) + 0xB24) <= 1 && !g_Gui.IsDialogPresent())
+    if (*reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(background) + 0xB24) <= 1 && TH08_STAGE_BACKGROUND_VISIBLE())
     {
         if (background->stageVm0.activeSpriteIndex > 0)
         {
@@ -839,7 +844,7 @@ ChainCallbackResult Background::OnDrawHighPrio(Background *background)
         g_Supervisor.EnableFog();
     }
 
-    if (*reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(background) + 0xB24) <= 1 && !g_Gui.IsDialogPresent())
+    if (*reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(background) + 0xB24) <= 1 && TH08_STAGE_BACKGROUND_VISIBLE())
     {
         background->RenderObjects(0);
         background->RenderObjects(1);
@@ -857,7 +862,7 @@ ChainCallbackResult Background::OnDrawLowPrio(Background *background)
     i32 alpha;
     f32 zValue;
 
-    if (*reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(background) + 0xB24) <= 1 && !g_Gui.IsDialogPresent())
+    if (*reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(background) + 0xB24) <= 1 && TH08_STAGE_BACKGROUND_VISIBLE())
     {
         background->RenderObjects(2);
         background->RenderObjects(3);
@@ -917,6 +922,8 @@ ChainCallbackResult Background::OnDrawLowPrio(Background *background)
     *reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(background) + 0x647C) = 0;
     return CHAIN_CALLBACK_RESULT_CONTINUE;
 }
+
+#undef TH08_STAGE_BACKGROUND_VISIBLE
 
 // FUNCTION: th08 0x409850
 #pragma var_order(i, vector0, vector1, vector2, vector3, background)

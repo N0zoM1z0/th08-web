@@ -560,6 +560,17 @@ Other performance decisions are architectural:
 - latch input edges instead of compensating with repeated synthetic keys;
 - give Firefox its own presentation boundary without charging Chromium for it.
 
+The final blit owns its texture binding and sampler state. Removing the
+redundant bind plus minification and magnification filter assignments from
+`Present` saves three GL commands per frame; on the Firefox link those would
+also have been three main-thread proxy crossings.
+
+The pinned build script deliberately favors predictable workstation load over
+maximum throughput. Compilation is single-job, and each Docker invocation
+defaults to two CPUs, 4 GiB of memory, and no memory beyond that limit through
+swap. `TH08_WEB_BUILD_CPUS` and `TH08_WEB_BUILD_MEMORY` can override those caps
+when a builder needs a smaller or larger envelope.
+
 The in-game FPS label alone was not accepted as a performance oracle.
 Instrumentation separately counts browser callbacks and authored calculation
 frames, because a browser can call the outer loop at 60 Hz while the game itself
@@ -579,6 +590,8 @@ path. Correctness testing moved outward in layers.
 | Route logic | Expected stage branch and spell sequence appear through a full Lunatic Final-B route. |
 | Lifecycle | Ending/result, score write, title reconstruction, and a second start complete without a Wasm trap. |
 | Persistence | Config and save probes survive reload; recursive inspection finds no DAT in IDBFS. |
+| Save/replay integrity | A native 16,048-byte score, bundled demos, and an external retail-format replay load; malformed compressed sizes, truncated replay headers, and invalid decoded offsets are rejected before use. |
+| Stage 5 | An external Stage 5 replay renders its background, bullets, player, and HUD without a worker or Wasm abort. |
 | Browser boundary | Chromium direct presentation has complete-route coverage; Firefox bitmap has historical complete-route coverage, while the faster proxy path has Stage 1 automation and preliminary 50+ FPS hardware play. |
 | Deployment | Public HTML/Wasm carry isolation headers; Wasm MIME and remote digest match the local release. |
 
@@ -705,7 +718,7 @@ work is bounded rather than architectural:
   across a complete route;
 - expand replay, pause/focus, audio-underrun, and repeated-stage regressions;
 - measure the fixed shared-memory ceiling under repeated long sessions;
-- add optional gamepad mapping and clearer unsupported-browser diagnostics.
+- add optional gamepad mapping and broaden the tested desktop-browser matrix.
 
 The core product boundary remains unchanged: source-built gameplay in Wasm,
 local legal retail data, browser-owned platform services, and a provenance-gated

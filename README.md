@@ -89,7 +89,9 @@ from this revision use the exact nine-file layout documented below.
 
 The game requires WebAssembly threads, `SharedArrayBuffer`, WebGL 2, Web Audio,
 and a cross-origin-isolated HTTPS page. The production site supplies the
-required COOP and COEP headers.
+required COOP and COEP headers. The launcher checks the isolation, shared-memory,
+canvas-transfer, and WebGL 2 boundaries before enabling Start and reports the
+missing requirement directly.
 
 For the smoothest bullet-hell input and pacing, close heavily loaded tabs,
 leave browser hardware acceleration enabled, and avoid power-saving modes that
@@ -137,6 +139,7 @@ have been exercised with locally selected retail data:
 - title, difficulty, team, practice, Music Room, dialogue, and result screens;
 - keyboard movement, shooting, focus, bombs, score, browser-local replay
   recording and playback, and other browser-local saves;
+- an external Stage 5 replay plus rejection of a deliberately truncated replay;
 - direct WebGL 2 rendering and Web Audio playback;
 - a complete Lunatic Border Team Final-B route in Chromium;
 - a complete Lunatic Border Team Final-B endurance route on the earlier
@@ -167,6 +170,13 @@ python3 scripts/check-web-provenance.py --artifact build/web-dist
 scripts/serve-web.py --port 8000
 ```
 
+The build is intentionally single-job and limits each Docker invocation to two
+CPUs and 4 GiB by default. Override the caps only when needed, for example:
+
+```bash
+TH08_WEB_BUILD_CPUS=1 TH08_WEB_BUILD_MEMORY=3g scripts/build-web-game.sh
+```
+
 Open `http://127.0.0.1:8000/`. Do not use a generic static server for this
 build: Emscripten pthreads require the COOP, COEP, and CORP headers supplied by
 `scripts/serve-web.py`.
@@ -187,6 +197,14 @@ th08-web-icon.png
 
 Any extra file, missing file, symbolic link, executable, retail archive, or
 common archive container causes the provenance check to fail.
+
+After packaging or testing, the generated trees can be reclaimed explicitly:
+
+```bash
+cmake -E remove_directory build/web-game
+cmake -E remove_directory build/web-dist
+cmake -E remove_directory build/emscripten-cache
+```
 
 ## Release boundary
 

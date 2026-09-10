@@ -6,10 +6,18 @@ repo_root="$(cd "${script_dir}/.." && pwd)"
 build_dir="${repo_root}/build/web-game"
 dist_dir="${repo_root}/build/web-dist"
 image="emscripten/emsdk:6.0.8@sha256:f174124ff798a3ead1abef247d9a849c270b642d552fea500a42565ff210f765"
+build_cpus="${TH08_WEB_BUILD_CPUS:-2}"
+build_memory="${TH08_WEB_BUILD_MEMORY:-4g}"
+docker_limits=(
+    --cpus "${build_cpus}"
+    --memory "${build_memory}"
+    --memory-swap "${build_memory}"
+)
 
 cmake -E make_directory "${build_dir}" "${repo_root}/build/emscripten-cache"
 
 docker run --rm \
+    "${docker_limits[@]}" \
     --volume "${repo_root}:/src" \
     --workdir /src \
     --user "$(id -u):$(id -g)" \
@@ -21,6 +29,7 @@ docker run --rm \
         -DTH08_WEB_OUTPUT_NAME=th08-web
 
 docker run --rm \
+    "${docker_limits[@]}" \
     --volume "${repo_root}:/src" \
     --workdir /src \
     --user "$(id -u):$(id -g)" \
@@ -34,6 +43,7 @@ echo "Built ${build_dir}/th08-web.html"
 # GPU readbacks. Reuse the compiled objects and relink a browser-specific build
 # whose small batched WebGL command stream is proxied to a main-thread canvas.
 docker run --rm \
+    "${docker_limits[@]}" \
     --volume "${repo_root}:/src" \
     --workdir /src \
     --user "$(id -u):$(id -g)" \
@@ -45,6 +55,7 @@ docker run --rm \
         -DTH08_WEB_OUTPUT_NAME=th08-web-firefox
 
 docker run --rm \
+    "${docker_limits[@]}" \
     --volume "${repo_root}:/src" \
     --workdir /src \
     --user "$(id -u):$(id -g)" \
@@ -57,6 +68,7 @@ echo "Built ${build_dir}/th08-web-firefox.html"
 # Leave the build tree configured for the primary Chromium artifact so a
 # normal incremental `cmake --build` does not unexpectedly relink Firefox.
 docker run --rm \
+    "${docker_limits[@]}" \
     --volume "${repo_root}:/src" \
     --workdir /src \
     --user "$(id -u):$(id -g)" \

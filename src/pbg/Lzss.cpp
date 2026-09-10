@@ -208,14 +208,47 @@ u8 *Lzss::Encode(u8 *in, i32 inSize, i32 *outSize)
 /**
  * \brief Write a byte to the output buffer.
  */
+#ifdef TH08_MODERN_PORT
+#define DECODE_WRITE_BYTE(data)                                                                                        \
+    if (outCursor - out >= outSize)                                                                                    \
+    {                                                                                                                  \
+        if (allocatedOutput)                                                                                           \
+        {                                                                                                              \
+            MemFree(out);                                                                                              \
+        }                                                                                                              \
+        return NULL;                                                                                                   \
+    }                                                                                                                  \
+    *outCursor++ = data;                                                                                               \
+    m_Dict[dictHead] = data;                                                                                           \
+    dictHead = LZSS_DICTPOS_MOD(dictHead, 1);
+#else
 #define DECODE_WRITE_BYTE(data)                                                                                        \
     *outCursor++ = data;                                                                                               \
     m_Dict[dictHead] = data;                                                                                           \
     dictHead = LZSS_DICTPOS_MOD(dictHead, 1);
+#endif
 
 /**
  * \brief Fetch a new byte from the input buffer if the current byte has been fully decoded.
  */
+#ifdef TH08_MODERN_PORT
+#define DECODE_HANDLE_FETCH                                                                                            \
+    if (inBitMask == 0x80)                                                                                             \
+    {                                                                                                                  \
+        if (inCursor - in >= size)                                                                                     \
+        {                                                                                                              \
+            /* The retail encoder relies on zero padding to expose the */                                              \
+            /* terminator after the final stored byte. */                                                              \
+            currByte = 0;                                                                                              \
+        }                                                                                                              \
+        else                                                                                                           \
+        {                                                                                                              \
+            currByte = *inCursor;                                                                                      \
+            inCursor++;                                                                                                \
+        }                                                                                                              \
+        checksum += currByte;                                                                                          \
+    }
+#else
 #define DECODE_HANDLE_FETCH                                                                                            \
     if (inBitMask == 0x80)                                                                                             \
     {                                                                                                                  \
@@ -230,6 +263,7 @@ u8 *Lzss::Encode(u8 *in, i32 inSize, i32 *outSize)
         }                                                                                                              \
         checksum += currByte;                                                                                          \
     }
+#endif
 
 /**
  * \brief Read and unpack a single bit from the input buffer.
@@ -279,6 +313,14 @@ u8 *Lzss::Decode(u8 *in, i32 inSize, u8 *out, i32 outSize)
     i32 i;
     u32 dictValue;
     u32 outBitMask;
+#ifdef TH08_MODERN_PORT
+    bool allocatedOutput = false;
+
+    if (in == NULL || inSize <= 0 || outSize < 0)
+    {
+        return NULL;
+    }
+#endif
 
     inBitMask = 0x80;
     currByte = 0;
@@ -292,6 +334,9 @@ u8 *Lzss::Decode(u8 *in, i32 inSize, u8 *out, i32 outSize)
         {
             return NULL;
         }
+#ifdef TH08_MODERN_PORT
+        allocatedOutput = true;
+#endif
     }
 
     inCursor = in;
@@ -337,6 +382,17 @@ u8 *Lzss::Decode(u8 *in, i32 inSize, u8 *out, i32 outSize)
     {
         DECODE_UNPACK_BIT;
     }
+
+#ifdef TH08_MODERN_PORT
+    if (outCursor - out != outSize)
+    {
+        if (allocatedOutput)
+        {
+            MemFree(out);
+        }
+        return NULL;
+    }
+#endif
 
     return out;
 

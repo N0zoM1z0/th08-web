@@ -80,6 +80,14 @@ a valid development secure context. A remote machine should use HTTPS; the raw
 LAN or Tailscale HTTP address can display the launcher but cannot start this
 pthread build in a conforming browser.
 
+Before enabling **Start TH08**, the launcher now checks cross-origin isolation,
+`SharedArrayBuffer`/`Atomics.wait`, transferable worker canvases for the direct
+path, and WebGL 2. Unsupported environments remain on the launcher with an
+actionable reason instead of failing later in Emscripten startup. This is a
+diagnostic boundary, not a single-thread fallback: the authored startup, BGM,
+and blocking compatibility seams require the pthread architecture described
+above.
+
 ### Data bridge
 
 The C++ Win32 file compatibility layer recognizes only the two retail archive
@@ -105,6 +113,12 @@ close operations retain their synchronous authored-facing behavior.
   writing either retail archive into the persistent tree.
 - If IndexedDB is unavailable, the same allowlisted layout remains usable as
   session-only MEMFS and the launcher reports the fallback in its runtime log.
+- Modern resource readers keep the post-decryption size synchronized with the
+  returned allocation. LZSS fetches never dereference past compressed input,
+  retain the retail format's zero-padding terminator behavior, and reject output
+  that exceeds or fails to reach the declared size. Score and replay loaders
+  validate their compressed ranges and decoded structure before use. These
+  checks do not alter the VC7 reconstruction path.
 
 ### Rendering and frame pacing
 
@@ -164,6 +178,10 @@ D3D8-shaped sprite stream into a few commands and one batched vertex upload per
 frame. Proxying the earlier immediate-mode stream would merely have replaced a
 readback bottleneck with thousands of cross-thread calls. The current proxy
 moves a small command stream while all framebuffer pixels remain on the GPU.
+The final Web blit also owns its texture binding and sampler state, so `Present`
+does not emit the former redundant bind and two filter commands. This removes
+three GL calls per frame from both links and, most importantly, three pthread
+proxy crossings per frame from Firefox.
 
 `?perf=1` enables presentation diagnostics without changing the default
 release hot path. It measures main-thread animation-frame intervals, bitmap
@@ -249,6 +267,16 @@ missing effects, unstable scores, and an eventual out-of-bounds trap during a
 result transition. Runtime diagnostics verify the most failure-prone aliases
 before endurance tests.
 
+The native Windows i386 prerequisite pass also exposed gameplay defects that
+were independent of browser APIs. The Web build now carries the same
+target-evidenced behavior at its modern boundary: stage backgrounds use the
+stage-finished flag rather than dialogue presence, the enemy-name copy uses the
+front ANM owner, item popups use their correct pools, randomized player shots
+use the signed RNG result, bomb effects test the current timer value, and the
+retry menu distinguishes Spell Practice from ordinary Practice. Keeping these
+corrections explicit prevents a successful Web link from masking stale
+reconstruction behavior.
+
 ## Build and run
 
 Docker is the only Emscripten prerequisite. The build image is pinned by tag
@@ -259,6 +287,10 @@ scripts/build-web-game.sh
 python3 scripts/check-web-provenance.py --artifact build/web-dist
 scripts/serve-web.py --bind 127.0.0.1 --port 8000
 ```
+
+Compilation is single-job. Docker defaults to a two-CPU, 4 GiB, no-extra-swap
+envelope; `TH08_WEB_BUILD_CPUS` and `TH08_WEB_BUILD_MEMORY` override those caps
+when a different builder budget is required.
 
 Open `http://127.0.0.1:8000/`, select local files named exactly `th08.dat` and
 `thbgm.dat`, and choose **Start TH08**. Keyboard controls are listed in the
@@ -355,6 +387,18 @@ All Web builds use
   progression from about 24 FPS to about 33--36 FPS, moved the player through
   the expected shared input path, created active/hit shots, and rendered the
   gameplay field without a page or worker error.
+- On 2026-09-11, both Release links were rebuilt with the pinned Emscripten
+  image under a two-CPU, 4 GiB, single-job limit and passed the staged-artifact
+  provenance gate. Headless Chromium 150 with SwiftShader loaded the legal
+  46,838,025-byte and 449,961,024-byte retail files, repeatedly ran bundled
+  demonstrations, and loaded a 3,246-byte external `th8_03.rpy`. The replay
+  menu resolved its recorded Stage 5, ignored a separate synthetic 16-byte
+  truncated replay, and entered Stage 5 with the background, bullets, player,
+  and HUD visible. A 15-second gameplay-only pacing sample contained 899 rAF
+  intervals averaging 16.666 ms, with a 16.670 ms maximum and no interval over
+  20 ms. These are bounded software-renderer correctness/pacing observations,
+  not a hardware GPU benchmark. Serving the same artifact without isolation
+  headers kept Start disabled and displayed the expected COOP/COEP diagnostic.
 
 Run the bounded probes with:
 
@@ -377,7 +421,8 @@ public-deployment gates. It is a public engineering release. The next work is:
    pause/focus, audio-underrun, and repeated stage-reload regressions;
 2. measure and tune the fixed shared-memory ceiling under repeated long
    sessions;
-3. add gamepad mapping and user-facing diagnostics for unsupported browsers.
+3. add gamepad mapping and broaden the tested desktop-browser compatibility
+   matrix.
 
 ## Primary references
 

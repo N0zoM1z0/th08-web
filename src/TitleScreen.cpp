@@ -618,7 +618,7 @@ ChainCallbackResult TitleScreen::OnUpdateStartMenu()
     case TitleCurrentScreenState_Exit:
         if (stateTimer >= 60)
         {
-            ZUN_DELETE2(this->vms);
+            ZUN_DELETE_ARRAY2(this->vms);
             // Yes, this->vms is set to NULL twice.
             this->vms = NULL;
 
@@ -3244,6 +3244,9 @@ ChainCallbackResult TitleScreen::OnUpdateReplayMenu()
             {
                 if (g_AnmManager->LoadSurface(0, "title/select00.png") != ZUN_SUCCESS)
                 {
+#ifdef TH08_MODERN_WEB
+                    fprintf(stderr, "th08-web: replay menu: selection surface failed\n");
+#endif
                     return CHAIN_CALLBACK_RESULT_CONTINUE_AND_REMOVE_JOB;
                 }
             }
@@ -3321,6 +3324,9 @@ ChainCallbackResult TitleScreen::OnUpdateReplayMenu()
             FindClose(firstFile);
             _chdir("../");
             this->replayCount = replayCount;
+#ifdef TH08_MODERN_WEB
+            fprintf(stderr, "th08-web: replay menu: %d valid replay entries\n", replayCount);
+#endif
             this->unk0xc284 = 0;
         }
 
@@ -3981,7 +3987,7 @@ ZunResult TitleScreen::Release()
 
     if (this->vms != NULL)
     {
-        ZUN_DELETE2(this->vms);
+        ZUN_DELETE_ARRAY2(this->vms);
         /* Again, double NULL set. */
         this->vms = NULL;
     }

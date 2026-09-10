@@ -105,6 +105,27 @@
       let started = false;
       let gameFileSystemReady = false;
 
+      function detectRuntimeSupport() {
+        if (!window.crossOriginIsolated) {
+          return "This build requires cross-origin isolation. Serve it with COOP/COEP headers over HTTPS or localhost.";
+        }
+        if (typeof SharedArrayBuffer !== "function" ||
+            typeof Atomics === "undefined" || typeof Atomics.wait !== "function") {
+          return "This browser cannot run the shared-memory WebAssembly threads required by TH08 Web.";
+        }
+        if (presentationMode !== "proxy" &&
+            typeof HTMLCanvasElement.prototype.transferControlToOffscreen !== "function") {
+          return "This browser cannot transfer the game canvas to the TH08 worker. Chrome or Edge is recommended.";
+        }
+        const probe = document.createElement("canvas");
+        if (!probe.getContext("webgl2")) {
+          return "WebGL 2 is unavailable. Enable hardware acceleration or use a browser with WebGL 2 support.";
+        }
+        return "";
+      }
+
+      const runtimeSupportError = detectRuntimeSupport();
+
       const persistentFiles = ["th08.cfg", "score.dat", "score.txt"];
       const persistentDirectories = ["replay", "backup", "snapshot"];
       const retailArchiveNames = new Set(["th08.dat", "thbgm.dat"]);
@@ -187,9 +208,9 @@
       }
 
       function updateStartState() {
-        startButton.disabled = started || !runtimeReady || !crossOriginIsolated || !selectionIsValid();
-        if (!crossOriginIsolated) {
-          statusElement.textContent = "This build requires cross-origin isolation. Serve it with the repository development server or equivalent COOP/COEP headers.";
+        startButton.disabled = started || !runtimeReady || !!runtimeSupportError || !selectionIsValid();
+        if (runtimeSupportError) {
+          statusElement.textContent = runtimeSupportError;
         } else if (!selectionIsValid() && runtimeReady) {
           statusElement.textContent = "Select files named th08.dat and thbgm.dat to continue.";
         } else if (!started && runtimeReady) {
@@ -376,18 +397,28 @@
         print: appendLog,
         printErr: appendLog,
         setStatus: (line) => {
-          if (line) statusElement.textContent = line;
+          if (runtimeSupportError) {
+            statusElement.textContent = runtimeSupportError;
+          } else if (line) {
+            statusElement.textContent = line;
+          }
         },
         onAbort: (reason) => {
           statusElement.textContent = `The game aborted: ${reason}`;
         },
         onRuntimeInitialized: () => {
+          if (runtimeSupportError) {
+            updateStartState();
+            return;
+          }
           installPresentation();
           appendLog(`th08-web: presentation mode: ${presentationMode}`);
           runtimeReady = true;
           updateStartState();
         },
       };
+
+      updateStartState();
 
       startButton.addEventListener("click", async () => {
         if (!selectionIsValid() || started) return;

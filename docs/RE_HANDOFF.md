@@ -11,6 +11,36 @@ come from the ledgers, not this prose.
 lane and does not alter the exact VC7 evidence product or its authored/library
 ledgers.
 
+Current 2026-09-11 checkpoint on `fix/runtime-parity-performance`:
+
+- synchronized the target-evidenced Windows i386 prerequisite corrections
+  needed by the Web runtime: stage background visibility, enemy-name ANM
+  ownership, score/player popup selection, signed shot RNG, current bomb-timer
+  tests, and the Spell Practice retry gate;
+- hardened modern ownership and data parsing with matching `delete[]` for
+  legacy arrays, post-decryption allocation lengths, bounded LZSS input/output,
+  score structure validation, and replay header/length/offset validation. The
+  LZSS boundary keeps the retail encoder's required zero-padding terminator
+  behavior. The VC7 branches of these changes are preserved. This checkout has
+  no canonical `resources/th08.exe`, so this batch makes no new exact-match or
+  aggregate reconstruction claim;
+- added pre-start diagnostics for isolation, shared-memory atomics,
+  transferable canvases, and WebGL 2. The pthread architecture remains a
+  requirement rather than silently switching to an incompatible single-thread
+  build;
+- removed three redundant GL state calls from every final Web blit. The pinned
+  build script remains single-job and now defaults each Docker invocation to a
+  two-CPU, 4 GiB, no-extra-swap envelope;
+- rebuilt both Chromium and Firefox Release links with the pinned Emscripten
+  6.0.8 image and passed Web provenance. Headless Chromium 150/SwiftShader ran
+  repeated bundled demos, enumerated and played an external 3,246-byte replay
+  at Stage 5, and ignored a synthetic 16-byte truncated replay. The Stage 5
+  background, bullets, player, and HUD rendered; a reset 15-second sample held
+  899 rAF intervals at 16.666 ms average/16.670 ms maximum with none over
+  20 ms. This is bounded software-renderer evidence, not a hardware benchmark.
+  A plain-server negative test kept Start disabled and displayed the isolation
+  diagnostic.
+
 Web-port state on 2026-08-26:
 
 - the digest-pinned Emscripten 6.0.8 compiler builds all 44 shared authored

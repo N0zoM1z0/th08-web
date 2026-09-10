@@ -1564,7 +1564,11 @@ void RetryMenu::OnDraw()
         if (((g_EclGameTimeScaleFlags >> 1) & 1) != 0 && (this->curState != 0 || this->numFrames > 2))
             g_AnmManager->DrawNoRotation(&this->menuBackground);
 
+#ifdef TH08_MODERN_WEB
+        if (!g_GameManager.IsSpellPractice() && g_GameManager.difficulty < EXTRA)
+#else
         if (!g_GameManager.IsPracticeMode() && g_GameManager.difficulty < EXTRA)
+#endif
         {
             for (vmIdx = 0; vmIdx < 4; vmIdx++)
                 if (this->menuSprites[vmIdx].IsVisible())

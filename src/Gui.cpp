@@ -1794,15 +1794,21 @@ void __fastcall FUN_00437f5c(i32 spriteIdx)
     RECT destRect;
     RECT srcRect;
 
-    destRect.left = (i32)g_Gui.stageTextAnm->GetSprite(10)->startPixelInclusive.x;
-    destRect.top = (i32)g_Gui.stageTextAnm->GetSprite(10)->startPixelInclusive.y;
-    destRect.right = (i32)g_Gui.stageTextAnm->GetSprite(10)->endPixelInclusive.x;
-    destRect.bottom = (i32)g_Gui.stageTextAnm->GetSprite(10)->endPixelInclusive.y;
+#ifdef TH08_MODERN_WEB
+#define TH08_ENEMY_NAME_ANM g_Gui.frontAnm
+#else
+#define TH08_ENEMY_NAME_ANM g_Gui.stageTextAnm
+#endif
+    destRect.left = (i32)TH08_ENEMY_NAME_ANM->GetSprite(10)->startPixelInclusive.x;
+    destRect.top = (i32)TH08_ENEMY_NAME_ANM->GetSprite(10)->startPixelInclusive.y;
+    destRect.right = (i32)TH08_ENEMY_NAME_ANM->GetSprite(10)->endPixelInclusive.x;
+    destRect.bottom = (i32)TH08_ENEMY_NAME_ANM->GetSprite(10)->endPixelInclusive.y;
 
-    srcRect.left = (i32)g_Gui.stageTextAnm->GetSprite(spriteIdx)->startPixelInclusive.x;
-    srcRect.top = (i32)g_Gui.stageTextAnm->GetSprite(spriteIdx)->startPixelInclusive.y;
-    srcRect.right = (i32)g_Gui.stageTextAnm->GetSprite(spriteIdx)->endPixelInclusive.x;
-    srcRect.bottom = (i32)g_Gui.stageTextAnm->GetSprite(spriteIdx)->endPixelInclusive.y;
+    srcRect.left = (i32)TH08_ENEMY_NAME_ANM->GetSprite(spriteIdx)->startPixelInclusive.x;
+    srcRect.top = (i32)TH08_ENEMY_NAME_ANM->GetSprite(spriteIdx)->startPixelInclusive.y;
+    srcRect.right = (i32)TH08_ENEMY_NAME_ANM->GetSprite(spriteIdx)->endPixelInclusive.x;
+    srcRect.bottom = (i32)TH08_ENEMY_NAME_ANM->GetSprite(spriteIdx)->endPixelInclusive.y;
+#undef TH08_ENEMY_NAME_ANM
 
     g_AnmManager->CopyTextureRect(10, 0, 10, 1, &destRect, &srcRect);
 }
