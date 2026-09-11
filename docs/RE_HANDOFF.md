@@ -11,7 +11,8 @@ come from the ledgers, not this prose.
 lane and does not alter the exact VC7 evidence product or its authored/library
 ledgers.
 
-Current 2026-09-11 checkpoint on `fix/runtime-parity-performance`:
+Current 2026-09-11 checkpoints (`fix/runtime-parity-performance` merged as
+PR #2; the follow-up performance work is on `perf/web-streaming-vbo`):
 
 - synchronized the target-evidenced Windows i386 prerequisite corrections
   needed by the Web runtime: stage background visibility, enemy-name ANM
@@ -39,7 +40,37 @@ Current 2026-09-11 checkpoint on `fix/runtime-parity-performance`:
   899 rAF intervals at 16.666 ms average/16.670 ms maximum with none over
   20 ms. This is bounded software-renderer evidence, not a hardware benchmark.
   A plain-server negative test kept Start disabled and displayed the isolation
-  diagnostic.
+  diagnostic;
+- replaced the Web renderer's per-upload VBO rotation and offset-zero reuse
+  with a three-buffer, once-per-frame streaming store. Each selected store is
+  orphaned once and receives the game batch and final blit at increasing
+  offsets. Vertex conversion now writes directly into the persistent frame
+  queue, and only adjacent triangle draws with identical captured state are
+  coalesced;
+- added bounded one-range BGM lookahead without copying the roughly 450 MB
+  archive into Wasm memory. The lookahead follows the authored 44,100-byte
+  notification reads, so it skips an unusable cache tail and fetches the next
+  actual miss. Diagnostic Stage 5 reads that previously blocked for tens of
+  milliseconds were normally ready in roughly 1--7 ms in the final sample;
+- preserved authored 60 Hz logical time across browser callback jitter with a
+  Web-only fixed-step accumulator. The previous gate discarded missed
+  intervals because it could execute at most one calculation per callback.
+  Native and VC7 timing remain unchanged, and worker callbacks stay separately
+  observable so catch-up cannot conceal a presentation slowdown;
+- retained `scripts/test-web-runtime.mjs`, its pinned `playwright-core`
+  dependency, and the documented command as a reusable release-artifact test.
+  It serves only the provenance-gated artifact, accepts caller-owned DATs and
+  one replay without tracking them, drives the authored Replay menu in fresh
+  browser contexts, and records screenshots plus JSON diagnostics;
+- GitHub Actions run `34560049728` rebuilt both links from commit `93aa518`
+  with pinned Emscripten 6.0.8, passed repository validation and deployment
+  provenance, and uploaded the branch test artifact without deploying it.
+  A 20-second Stage 5 replay measurement after a separate 10-second warm-up
+  observed 1,200 callbacks and 1,205 calculations in both links: direct was
+  59.99 / 60.24 Hz and forced proxy was 59.99 / 60.24 Hz. Both stayed on Stage
+  5 with identical route/shot snapshots, valid rendering, and no test failure,
+  page crash, or console error. This is deterministic SwiftShader coverage,
+  not the requested follow-up Mac hardware measurement.
 
 Web-port state on 2026-08-26:
 

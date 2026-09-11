@@ -183,18 +183,82 @@ does not emit the former redundant bind and two filter commands. This removes
 three GL calls per frame from both links and, most importantly, three pthread
 proxy crossings per frame from Firefox.
 
+A 2026-09-11 Chrome/macOS endurance report exposed a separate late-frame
+problem: gameplay could settle at 30--40 FPS as scene density increased. The
+old upload ring selected a new VBO for every upload, not every presented frame,
+and rewrote offset zero with `glBufferSubData()` whenever the buffer was large
+enough. Three object names alone do not guarantee that ANGLE has finished with
+an object's current storage, so a later upload can make the CPU wait for the
+Apple GPU.
+
+The `reallyportable` branch of `some100/th07` provided adjacent-port
+corroboration for the safer stream shape: it rotates VBOs at frame start,
+orphans the selected store with `glBufferData(..., NULL, GL_STREAM_DRAW)`, and
+appends all uploads within that frame. This is not TH08 target evidence and its
+single-thread SDL3/Web build is not directly transferable: TH08 keeps its
+pthread boundary so synchronous authored file access, browser `File` range
+reads for the roughly 450 MB BGM archive, and Web Audio startup continue to
+work.
+
+TH08's Web renderer now uses the same bounded storage principle while retaining
+its own architecture. It starts each presented frame with one fresh 1 MiB
+store on the next of three VBOs, appends the batched game vertices and final
+blit, and grows/orphans only if the frame exceeds that store. Vertex conversion
+writes directly into the persistent frame queue, avoiding the former temporary
+vector and second copy, and adjacent triangle lists are combined only when
+their complete captured draw state is byte-identical. This removes possible
+in-flight overwrite stalls without changing draw order, primitive topology, or
+authored calculation timing.
+
+TH07 avoids browser file stalls by preloading its packaged assets, but copying
+TH08's roughly 450 MB BGM archive into Wasm would consume most of the fixed heap
+before gameplay. TH08 instead keeps a bounded two-chunk stream: the authored
+synchronous read consumes one 1 MiB cache while the browser asynchronously
+prefetches the next expected cache miss. The lookahead accounts for the
+authored 44,100-byte DirectSound notification reads: it advances by the number
+of complete requests that fit and skips the cache tail that cannot satisfy the
+next request. A sequential cache miss normally
+copies an already-resolved `ArrayBuffer` into shared memory; seeking or a failed
+prefetch falls back to the existing direct Blob range read and restarts the
+lookahead. At most one future range is retained, so the optimization removes
+periodic I/O waits without making the retail archive persistent or bundling it.
+
 `?perf=1` enables presentation diagnostics without changing the default
 release hot path. It measures main-thread animation-frame intervals, bitmap
 creation, worker-to-main message latency, bitmap arrival, and bitmap
 presentation separately. C++ counters independently report browser callbacks,
-authored calculation frames, draw commands, and submitted vertices. Keeping
-these clocks separate prevents a nominal browser callback rate or the in-game
-counter from hiding slower simulation progress.
+authored calculation frames, draw commands, submitted vertices, streaming
+upload time, and average/maximum submission time in repeating windows. A
+visible five-second summary reports browser rAF, worker callback, and authored
+game rates separately. Keeping these clocks separate prevents a nominal
+browser callback rate or the in-game counter from hiding slower simulation
+progress. The same diagnostic mode logs every direct or prefetched retail Blob
+read with its byte range and worker wait time, separating I/O stalls from VBO
+submission stalls.
 
-A short Chromium active-gameplay sample recorded 297 browser callbacks and 297
-authored calculation frames in five seconds. The renderer separately measured
-approximately 0.08--0.15 ms of CPU game submission and 0.01--0.03 ms of blit
-work per frame in representative direct-rendering scenes.
+Those separated counters exposed a third boundary in the original-shaped Web
+loop: a proxy sample could receive 60 worker callbacks per second but execute
+only about 50--51 authored calculations. The old timestamp gate performed at
+most one calculation per callback and advanced past missed intervals, so rAF
+jitter or a message callback permanently discarded logical time. The Web-only
+loop now accumulates elapsed time, clamps one callback to 100 ms, executes the
+required 60 Hz calculation steps, and draws/presents once after catch-up. Replay
+input is still consumed once per authored calculation in its original order.
+The native/VC7 path is unchanged, and TH08 does not yet interpolate render
+state between calculations; worker rate remains separately visible so catch-up
+cannot disguise an actual 30--40 Hz presentation bottleneck.
+
+A replay-driven Chromium 150/SwiftShader check measured Stage 5 for 20 seconds
+after a separate 10-second warm-up. Direct presentation recorded 1,200 worker
+callbacks and 1,205 authored calculations (59.99 and 60.24 Hz); forced proxy
+presentation independently recorded the same deltas and rates. Both runs kept
+the same route and player-shot snapshots, produced valid gameplay screenshots,
+and reported no test failure, page crash, or console error. In the dense part
+of the sample the direct renderer submitted approximately 1,900--2,100 vertices
+per frame with about 0.03 ms average streaming-upload CPU time; proxy upload
+averaged approximately 0.19--0.24 ms. Prefetched BGM cache fills normally
+completed in roughly 1--7 ms. These are bounded software-renderer results, not
+a Mac hardware performance claim.
 
 Firefox pacing diagnostics isolate browser rAF, bitmap creation, message
 latency, bitmap presentation, worker callbacks, and authored calculations. In
@@ -399,6 +463,16 @@ All Web builds use
   20 ms. These are bounded software-renderer correctness/pacing observations,
   not a hardware GPU benchmark. Serving the same artifact without isolation
   headers kept Start disabled and displayed the expected COOP/COEP diagnostic.
+- The follow-up performance artifact at commit `93aa518` passed repository
+  validation and the staged-artifact provenance gate in GitHub Actions run
+  `34560049728`. The retained replay test ran the direct and forced-proxy links
+  in clean Chromium 150/SwiftShader contexts. After 10 seconds of Stage 5
+  warm-up, each 20-second sample recorded 1,200 worker callbacks and 1,205
+  authored calculations (59.99 and 60.24 Hz), remained on the expected stage,
+  and had no runtime-test failure or console error. Screenshots showed the
+  background, player, bullets, enemies, HUD, and diagnostic FPS counter. The
+  retail files and replay remained caller-supplied test inputs outside the
+  repository and artifact.
 
 Run the bounded probes with:
 
@@ -409,6 +483,30 @@ scripts/build-web-data-probe.sh
 scripts/build-web-renderer-probe.sh
 python3 scripts/check-web-provenance.py
 ```
+
+For a replay-driven browser test of the release artifacts, install the pinned
+automation library (it does not download a browser) and pass local retail files
+explicitly:
+
+```bash
+npm ci --ignore-scripts
+npm run test:web-runtime -- \
+  --artifact build/web-dist \
+  --game-data /path/to/th08.dat \
+  --bgm-data /path/to/thbgm.dat \
+  --replay /path/to/replay/th8_03.rpy \
+  --expected-stage 5
+```
+
+The test starts an ephemeral isolated-header server, creates clean browser
+contexts, injects only the named replay into session MEMFS, navigates the
+authored Replay menus, and samples both direct and proxy presentation after a
+separate warm-up. It rejects browser errors, runtime traps, stage mismatches,
+and worker/calculation rates below `--minimum-fps`; screenshots and JSON go to
+an untracked temporary directory unless `--output-dir` is supplied. Chrome is
+auto-detected on macOS and common Linux paths. `--swiftshader --no-sandbox` is
+available for controlled headless environments and should not be used for a
+real-hardware performance claim.
 
 ## Remaining work
 

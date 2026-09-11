@@ -82,6 +82,7 @@ struct WebFileHandle : LinuxHandle
 DWORD g_retailFileSizes[2];
 BYTE *g_retailFileData[2];
 bool g_retailReadLogged[2];
+bool g_webIoDiagnostics;
 uint32_t g_webVirtualKeys[256];
 uint32_t g_webVirtualKeyPresses[256];
 
@@ -154,6 +155,7 @@ bool ReadRetailFile(WebFileHandle *handle, void *destination, DWORD size, DWORD 
         handle->cache.resize(fetchSize);
     void *fetchDestination = useReadAhead ? static_cast<void *>(&handle->cache[0]) : destination;
 
+    const double readStarted = g_webIoDiagnostics ? emscripten_get_now() : 0.0;
     volatile uint32_t status = 0;
     MAIN_THREAD_ASYNC_EM_ASM({
         const files = Module['th08RetailFiles'];
@@ -167,15 +169,51 @@ bool ReadRetailFile(WebFileHandle *handle, void *destination, DWORD size, DWORD 
             finish(-1);
             return;
         }
-        file.slice($1, $1 + $3).arrayBuffer().then((buffer) => {
+        const prefetches = Module['th08RetailPrefetches'] ||
+            (Module['th08RetailPrefetches'] = []);
+        const pending = prefetches[$0];
+        let usedPrefetch = !!pending && pending.offset === $1 && pending.size === $3;
+        let readPromise = usedPrefetch
+            ? pending.promise.then((buffer) => {
+                if (buffer !== null) return buffer;
+                usedPrefetch = false;
+                return file.slice($1, $1 + $3).arrayBuffer();
+              })
+            : file.slice($1, $1 + $3).arrayBuffer();
+        readPromise.then((buffer) => {
             const bytes = new Uint8Array(buffer);
             HEAPU8.set(bytes, $2);
-            finish(bytes.length + 1);
+            if ($5) {
+                // The authored stream consumes fixed notification-sized
+                // reads. If a request does not fit wholly in the current
+                // cache, C++ fetches again and leaves the short tail unused.
+                // Predict that miss rather than the physical end of 1 MiB.
+                const completeReads = Math.floor(bytes.length / $6);
+                const nextOffset = $1 + completeReads * $6;
+                const nextSize = Math.min($3, file.size - nextOffset);
+                if (completeReads > 0 && nextSize > 0) {
+                    prefetches[$0] = {
+                        offset: nextOffset,
+                        size: nextSize,
+                        promise: file.slice(nextOffset, nextOffset + nextSize).arrayBuffer()
+                            .catch((error) => {
+                                console.warn('Unable to prefetch TH08 BGM data:', error);
+                                return null;
+                            }),
+                    };
+                } else {
+                    prefetches[$0] = null;
+                }
+            } else if (usedPrefetch) {
+                prefetches[$0] = null;
+            }
+            finish((bytes.length + 1) | (usedPrefetch ? 0x80000000 : 0));
         }).catch((error) => {
             console.error('Unable to read the selected TH08 data file:', error);
             finish(-1);
         });
-    }, handle->index, handle->position, fetchDestination, fetchSize, &status);
+    }, handle->index, handle->position, fetchDestination, fetchSize, &status,
+       useReadAhead ? 1 : 0, requested);
 
     uint32_t *statusAddress = const_cast<uint32_t *>(&status);
     emscripten_atomic_wait_u32(statusAddress, 0, 30000000000LL);
@@ -187,7 +225,17 @@ bool ReadRetailFile(WebFileHandle *handle, void *destination, DWORD size, DWORD 
         return false;
     }
 
-    const DWORD count = result - 1;
+    const bool usedPrefetch = (result & 0x80000000U) != 0;
+    const DWORD count = (result & 0x7fffffffU) - 1;
+    if (g_webIoDiagnostics)
+    {
+        fprintf(stderr,
+                "th08-web: retail read: %s offset %lu, %lu bytes, %.3f ms (%s)\n",
+                handle->index == 0 ? "th08.dat" : "thbgm.dat",
+                static_cast<unsigned long>(handle->position),
+                static_cast<unsigned long>(count), emscripten_get_now() - readStarted,
+                usedPrefetch ? "prefetched" : "direct");
+    }
     handle->blobFetches++;
     handle->bytesFetched += count;
     DWORD delivered = count;
@@ -703,6 +751,11 @@ EMSCRIPTEN_KEEPALIVE void th08_web_set_retail_file_sizes(DWORD gameDataSize, DWO
     g_retailFileSizes[1] = bgmDataSize;
     fprintf(stderr, "th08-web: registered local retail data (%lu and %lu bytes)\n",
             static_cast<unsigned long>(gameDataSize), static_cast<unsigned long>(bgmDataSize));
+}
+
+EMSCRIPTEN_KEEPALIVE void th08_web_configure_io_diagnostics(BOOL enabled)
+{
+    g_webIoDiagnostics = enabled != FALSE;
 }
 
 EMSCRIPTEN_KEEPALIVE void *th08_web_allocate_game_data(DWORD gameDataSize)

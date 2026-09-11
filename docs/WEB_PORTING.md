@@ -565,6 +565,52 @@ redundant bind plus minification and magnification filter assignments from
 `Present` saves three GL commands per frame; on the Firefox link those would
 also have been three main-thread proxy crossings.
 
+A later Chrome/macOS endurance report showed that a short title or Stage 1
+sample was not enough: denser gameplay could decay to 30--40 FPS. Inspection
+found that the dynamic upload ring rotated per upload and repeatedly replaced
+offset zero with `glBufferSubData()`, but did not orphan an already-sized VBO.
+That can serialize the CPU behind an in-flight ANGLE/Apple-GPU buffer even with
+three object names.
+
+As adjacent-port evidence, `some100/th07`'s `reallyportable` renderer rotates
+the buffer at frame start, allocates fresh `GL_STREAM_DRAW` storage, and
+appends later uploads. TH08 adopted that storage lifecycle, not the rest of the
+port wholesale. In particular, TH07 can preload its assets and run SDL3 app
+callbacks on the browser main loop; TH08 must retain pthread execution and
+range-read `thbgm.dat`, so removing `PROXY_TO_PTHREAD` would break existing
+synchronous platform boundaries rather than constitute a free optimization.
+
+The asset difference suggested a second bounded optimization. TH08 continues
+to expose synchronous Win32-shaped reads to authored code, but after each
+1 MiB sequential BGM fetch the browser starts the next `File.slice()` promise
+without waiting for the cache to empty. The predicted offset advances by the
+complete authored notification reads that fit in the cache rather than by a
+physical 1 MiB boundary, preserving the short unused tail behavior. The
+following miss consumes that
+prefetched `ArrayBuffer` when available; seeks and prefetch failures retain the
+direct-read fallback. Only one future chunk is held, avoiding TH07's whole-file
+preload cost while removing the normal periodic promise wait from BGM playback.
+`?perf=1` labels every BGM range as direct or prefetched and records the worker
+wait, so this hypothesis remains measurable on macOS rather than being hidden
+inside the FPS counter.
+
+The TH08 Web path now orphans one buffer at the start of each presented frame,
+streams the batched game geometry and final blit into increasing offsets, and
+expands the initial 1 MiB store only when required. It also converts vertices
+directly into the persistent queue and merges only adjacent triangle lists
+whose captured state is identical. The change deliberately does not copy
+TH07's render interpolation because TH08 lacks the corresponding
+previous-state render model.
+
+Repeating diagnostics then observed a proxy case with 60 worker callbacks but
+only about 50--51 authored calculations per second. The original-shaped Web
+timestamp gate ran at most one calculation per callback and discarded missed
+intervals. A Web-only accumulator now keeps 60 Hz authored steps, clamps
+catch-up to 100 ms after long stalls, and renders once after all required
+calculations. This preserves replay frame order and leaves native/VC7 behavior
+untouched. It does not pretend that rendering is 60 Hz: the visible diagnostic
+continues to report browser, worker, and calculation rates separately.
+
 The pinned build script deliberately favors predictable workstation load over
 maximum throughput. Compilation is single-job, and each Docker invocation
 defaults to two CPUs, 4 GiB of memory, and no memory beyond that limit through
@@ -574,7 +620,11 @@ when a builder needs a smaller or larger envelope.
 The in-game FPS label alone was not accepted as a performance oracle.
 Instrumentation separately counts browser callbacks and authored calculation
 frames, because a browser can call the outer loop at 60 Hz while the game itself
-advances more slowly.
+advances more slowly. With `?perf=1`, the launcher now shows those three rates
+beside browser rAF in repeating five-second windows, while the runtime log
+reports repeating 600-frame average/maximum game submission, final-blit, and
+streaming-upload costs. The default path still stops sampling after its first
+600-frame summary.
 
 ## 16. Verify correctness beyond the title screen
 
