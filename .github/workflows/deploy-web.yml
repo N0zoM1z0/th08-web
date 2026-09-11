@@ -17,7 +17,7 @@ concurrency:
 jobs:
   deploy:
     name: Validate, build, and deploy Web release
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -36,7 +36,17 @@ jobs:
       - name: Verify the exact deployment boundary
         run: python3 scripts/check-web-provenance.py --artifact build/web-dist
 
+      - name: Upload branch test bundle
+        if: github.ref != 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: th08-web-${{ github.sha }}
+          path: build/web-dist
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Deploy to Cloudflare Pages
+        if: github.ref == 'refs/heads/main'
         uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

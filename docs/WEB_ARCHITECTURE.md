@@ -183,13 +183,43 @@ does not emit the former redundant bind and two filter commands. This removes
 three GL calls per frame from both links and, most importantly, three pthread
 proxy crossings per frame from Firefox.
 
+A 2026-09-11 Chrome/macOS endurance report exposed a separate late-frame
+problem: gameplay could settle at 30--40 FPS as scene density increased. The
+old upload ring selected a new VBO for every upload, not every presented frame,
+and rewrote offset zero with `glBufferSubData()` whenever the buffer was large
+enough. Three object names alone do not guarantee that ANGLE has finished with
+an object's current storage, so a later upload can make the CPU wait for the
+Apple GPU.
+
+The `reallyportable` branch of `some100/th07` provided adjacent-port
+corroboration for the safer stream shape: it rotates VBOs at frame start,
+orphans the selected store with `glBufferData(..., NULL, GL_STREAM_DRAW)`, and
+appends all uploads within that frame. This is not TH08 target evidence and its
+single-thread SDL3/Web build is not directly transferable: TH08 keeps its
+pthread boundary so synchronous authored file access, browser `File` range
+reads for the roughly 450 MB BGM archive, and Web Audio startup continue to
+work.
+
+TH08's Web renderer now uses the same bounded storage principle while retaining
+its own architecture. It starts each presented frame with one fresh 1 MiB
+store on the next of three VBOs, appends the batched game vertices and final
+blit, and grows/orphans only if the frame exceeds that store. Vertex conversion
+writes directly into the persistent frame queue, avoiding the former temporary
+vector and second copy, and adjacent triangle lists are combined only when
+their complete captured draw state is byte-identical. This removes possible
+in-flight overwrite stalls without changing draw order, primitive topology, or
+authored calculation timing.
+
 `?perf=1` enables presentation diagnostics without changing the default
 release hot path. It measures main-thread animation-frame intervals, bitmap
 creation, worker-to-main message latency, bitmap arrival, and bitmap
 presentation separately. C++ counters independently report browser callbacks,
-authored calculation frames, draw commands, and submitted vertices. Keeping
-these clocks separate prevents a nominal browser callback rate or the in-game
-counter from hiding slower simulation progress.
+authored calculation frames, draw commands, submitted vertices, streaming
+upload time, and average/maximum submission time in repeating windows. A
+visible five-second summary reports browser rAF, worker callback, and authored
+game rates separately. Keeping these clocks separate prevents a nominal
+browser callback rate or the in-game counter from hiding slower simulation
+progress.
 
 A short Chromium active-gameplay sample recorded 297 browser callbacks and 297
 authored calculation frames in five seconds. The renderer separately measured

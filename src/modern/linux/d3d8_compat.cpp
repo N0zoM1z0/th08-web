@@ -143,8 +143,8 @@ bool InitializeWebPipeline();
 void DestroyWebPipeline();
 bool DrawWebVertices(GLenum mode, const WebVertex *vertices, UINT count,
                      const WebDrawState &state);
-bool QueueWebVertices(GLenum mode, const WebVertex *vertices, UINT count,
-                      const WebDrawState &state);
+bool QueueWebVertexRange(GLenum mode, size_t first, UINT count,
+                         const WebDrawState &state);
 void FlushWebDraws();
 bool DrawWebBlit(GLuint texture, UINT width, UINT height, bool flipVertical, bool linearFilter);
 #endif
@@ -538,7 +538,7 @@ void ConfigureTextureComponent(GLenum combineParameter, GLenum source0Parameter,
 struct WebPipeline
 {
     WebPipeline()
-        : program(0), bufferIndex(0),
+        : program(0), bufferIndex(0), activeBufferIndex(0), bufferOffset(0), frameActive(false),
           viewportLocation(-1), textureLocation(-1), textureMaskLocation(-1),
           alphaThresholdLocation(-1), fogColorLocation(-1)
     {
@@ -552,7 +552,9 @@ struct WebPipeline
 
     GLuint program, vertexBuffers[3], vertexArrays[3];
     GLsizeiptr bufferCapacities[3];
-    UINT bufferIndex;
+    UINT bufferIndex, activeBufferIndex;
+    GLsizeiptr bufferOffset;
+    bool frameActive;
     GLint viewportLocation, textureLocation, textureMaskLocation;
     GLint alphaThresholdLocation, fogColorLocation;
 };
@@ -570,8 +572,13 @@ struct WebDrawCommand
 std::vector<WebVertex> g_webQueuedVertices;
 std::vector<WebDrawCommand> g_webQueuedCommands;
 double g_webGameFlushMilliseconds = 0.0;
+double g_webMaximumGameFlushMilliseconds = 0.0;
 double g_webBlitMilliseconds = 0.0;
+double g_webMaximumBlitMilliseconds = 0.0;
+double g_webUploadMilliseconds = 0.0;
+double g_webMaximumUploadMilliseconds = 0.0;
 unsigned long g_webMeasuredFrames = 0;
+unsigned long g_webMeasuredFlushes = 0;
 unsigned long g_webMeasuredCommands = 0;
 unsigned long g_webMeasuredVertices = 0;
 bool g_webMeasurementComplete = false;
@@ -584,6 +591,34 @@ enum WebPresentationMode
 };
 int g_webPresentationMode = WEB_PRESENTATION_AUTO;
 bool g_webPresentationDiagnostics = false;
+
+bool WebMeasurementActive()
+{
+    return g_webPresentationDiagnostics || !g_webMeasurementComplete;
+}
+
+void RecordWebUpload(double milliseconds)
+{
+    if (!WebMeasurementActive())
+        return;
+    g_webUploadMilliseconds += milliseconds;
+    if (milliseconds > g_webMaximumUploadMilliseconds)
+        g_webMaximumUploadMilliseconds = milliseconds;
+}
+
+void ResetWebMeasurementWindow()
+{
+    g_webGameFlushMilliseconds = 0.0;
+    g_webMaximumGameFlushMilliseconds = 0.0;
+    g_webBlitMilliseconds = 0.0;
+    g_webMaximumBlitMilliseconds = 0.0;
+    g_webUploadMilliseconds = 0.0;
+    g_webMaximumUploadMilliseconds = 0.0;
+    g_webMeasuredFrames = 0;
+    g_webMeasuredFlushes = 0;
+    g_webMeasuredCommands = 0;
+    g_webMeasuredVertices = 0;
+}
 
 GLuint CompileWebShader(GLenum type, const char *source)
 {
@@ -701,6 +736,8 @@ bool InitializeWebPipeline()
     }
     glUseProgram(g_webPipeline.program);
     glUniform1i(g_webPipeline.textureLocation, 0);
+    g_webQueuedVertices.reserve(32768);
+    g_webQueuedCommands.reserve(2048);
     fprintf(stderr, "th08-web: renderer: direct WebGL2 shader/VBO pipeline ready\n");
     return true;
 }
@@ -722,24 +759,62 @@ void SetWebColorUniform(GLint location, DWORD color)
                 ((color >> 24) & 255) / 255.0f);
 }
 
-bool BindWebVertexData(const WebVertex *vertices, UINT count)
+bool BeginWebFrame()
 {
-    if (!InitializeWebPipeline() || vertices == NULL || count == 0)
+    if (g_webPipeline.frameActive)
+        return true;
+    if (!InitializeWebPipeline())
         return false;
+
+    const double started = WebMeasurementActive() ? emscripten_get_now() : 0.0;
     const UINT index = g_webPipeline.bufferIndex++ % 3;
+    g_webPipeline.activeBufferIndex = index;
+    if (g_webPipeline.bufferCapacities[index] == 0)
+        g_webPipeline.bufferCapacities[index] = 1024 * 1024;
+    glBindVertexArray(g_webPipeline.vertexArrays[index]);
+    glBindBuffer(GL_ARRAY_BUFFER, g_webPipeline.vertexBuffers[index]);
+    // Allocate fresh streaming storage once per presented frame. This keeps
+    // WebGL/ANGLE from waiting for an earlier frame that still owns the old
+    // store, while subsequent uploads append without overwriting each other.
+    glBufferData(GL_ARRAY_BUFFER, g_webPipeline.bufferCapacities[index], NULL, GL_STREAM_DRAW);
+    g_webPipeline.bufferOffset = 0;
+    g_webPipeline.frameActive = true;
+    if (WebMeasurementActive())
+        RecordWebUpload(emscripten_get_now() - started);
+    return true;
+}
+
+void EndWebFrame()
+{
+    g_webPipeline.frameActive = false;
+    g_webPipeline.bufferOffset = 0;
+}
+
+bool BindWebVertexData(const WebVertex *vertices, UINT count, GLint *firstVertex)
+{
+    if (!BeginWebFrame() || vertices == NULL || count == 0 || firstVertex == NULL)
+        return false;
+    const double started = WebMeasurementActive() ? emscripten_get_now() : 0.0;
+    const UINT index = g_webPipeline.activeBufferIndex;
     const GLsizeiptr byteCount = static_cast<GLsizeiptr>(count * sizeof(WebVertex));
     glBindVertexArray(g_webPipeline.vertexArrays[index]);
     glBindBuffer(GL_ARRAY_BUFFER, g_webPipeline.vertexBuffers[index]);
-    if (byteCount > g_webPipeline.bufferCapacities[index])
+    if (g_webPipeline.bufferOffset + byteCount > g_webPipeline.bufferCapacities[index])
     {
-        GLsizeiptr capacity = g_webPipeline.bufferCapacities[index] != 0
-                                 ? g_webPipeline.bufferCapacities[index] : 4096;
+        GLsizeiptr capacity = g_webPipeline.bufferCapacities[index];
         while (capacity < byteCount)
             capacity *= 2;
-        glBufferData(GL_ARRAY_BUFFER, capacity, NULL, GL_DYNAMIC_DRAW);
+        // A frame larger than the current store gets another fresh store;
+        // already submitted draws retain the orphaned storage.
+        glBufferData(GL_ARRAY_BUFFER, capacity, NULL, GL_STREAM_DRAW);
         g_webPipeline.bufferCapacities[index] = capacity;
+        g_webPipeline.bufferOffset = 0;
     }
-    glBufferSubData(GL_ARRAY_BUFFER, 0, byteCount, vertices);
+    *firstVertex = static_cast<GLint>(g_webPipeline.bufferOffset / sizeof(WebVertex));
+    glBufferSubData(GL_ARRAY_BUFFER, g_webPipeline.bufferOffset, byteCount, vertices);
+    g_webPipeline.bufferOffset += byteCount;
+    if (WebMeasurementActive())
+        RecordWebUpload(emscripten_get_now() - started);
     return true;
 }
 
@@ -816,7 +891,9 @@ void FlushWebDraws()
     const double started = emscripten_get_now();
     const size_t commandCount = g_webQueuedCommands.size();
     const size_t vertexCount = g_webQueuedVertices.size();
-    if (!BindWebVertexData(&g_webQueuedVertices[0], static_cast<UINT>(g_webQueuedVertices.size())))
+    GLint firstVertex = 0;
+    if (!BindWebVertexData(&g_webQueuedVertices[0],
+                           static_cast<UINT>(g_webQueuedVertices.size()), &firstVertex))
     {
         g_webQueuedVertices.clear();
         g_webQueuedCommands.clear();
@@ -832,29 +909,43 @@ void FlushWebDraws()
     {
         const WebDrawCommand &command = g_webQueuedCommands[index];
         ApplyWebDrawState(command.state, &applied, &valid);
-        glDrawArrays(command.mode, command.first, command.count);
+        glDrawArrays(command.mode, firstVertex + command.first, command.count);
     }
     g_webQueuedVertices.clear();
     g_webQueuedCommands.clear();
-    if (!g_webMeasurementComplete)
+    if (WebMeasurementActive())
     {
-        g_webGameFlushMilliseconds += emscripten_get_now() - started;
+        const double elapsed = emscripten_get_now() - started;
+        g_webGameFlushMilliseconds += elapsed;
+        if (elapsed > g_webMaximumGameFlushMilliseconds)
+            g_webMaximumGameFlushMilliseconds = elapsed;
+        g_webMeasuredFlushes++;
         g_webMeasuredCommands += static_cast<unsigned long>(commandCount);
         g_webMeasuredVertices += static_cast<unsigned long>(vertexCount);
     }
 }
 
-bool QueueWebVertices(GLenum mode, const WebVertex *vertices, UINT count,
-                      const WebDrawState &state)
+bool QueueWebVertexRange(GLenum mode, size_t first, UINT count,
+                         const WebDrawState &state)
 {
-    if (vertices == NULL || count == 0)
+    if (count == 0)
         return false;
+    if (mode == GL_TRIANGLES && !g_webQueuedCommands.empty())
+    {
+        WebDrawCommand &previous = g_webQueuedCommands.back();
+        if (previous.mode == mode &&
+            previous.first + previous.count == static_cast<GLint>(first) &&
+            memcmp(&previous.state, &state, sizeof(state)) == 0)
+        {
+            previous.count += static_cast<GLsizei>(count);
+            return true;
+        }
+    }
     WebDrawCommand command;
     command.mode = mode;
-    command.first = static_cast<GLint>(g_webQueuedVertices.size());
+    command.first = static_cast<GLint>(first);
     command.count = static_cast<GLsizei>(count);
     command.state = state;
-    g_webQueuedVertices.insert(g_webQueuedVertices.end(), vertices, vertices + count);
     g_webQueuedCommands.push_back(command);
     return true;
 }
@@ -864,7 +955,8 @@ bool DrawWebVertices(GLenum mode, const WebVertex *vertices, UINT count,
 {
     FlushWebDraws();
     const double started = emscripten_get_now();
-    if (!BindWebVertexData(vertices, count))
+    GLint firstVertex = 0;
+    if (!BindWebVertexData(vertices, count, &firstVertex))
         return false;
     glUseProgram(g_webPipeline.program);
     glActiveTexture(GL_TEXTURE0);
@@ -873,9 +965,14 @@ bool DrawWebVertices(GLenum mode, const WebVertex *vertices, UINT count,
     memset(&applied, 0, sizeof(applied));
     bool valid = false;
     ApplyWebDrawState(state, &applied, &valid);
-    glDrawArrays(mode, 0, count);
-    if (!g_webMeasurementComplete)
-        g_webBlitMilliseconds += emscripten_get_now() - started;
+    glDrawArrays(mode, firstVertex, count);
+    if (WebMeasurementActive())
+    {
+        const double elapsed = emscripten_get_now() - started;
+        g_webBlitMilliseconds += elapsed;
+        if (elapsed > g_webMaximumBlitMilliseconds)
+            g_webMaximumBlitMilliseconds = elapsed;
+    }
     return true;
 }
 
@@ -1040,6 +1137,9 @@ class LinuxDevice : public IDirect3DDevice8
     }
     HRESULT Present(const RECT *, const RECT *, HWND, const RGNDATA *)
     {
+#ifdef TH08_MODERN_WEB
+        BeginWebFrame();
+#endif
         backbuffer->FlushBackbuffer();
 #ifdef TH08_MODERN_WEB
         FlushWebDraws();
@@ -1058,15 +1158,23 @@ class LinuxDevice : public IDirect3DDevice8
         // emitting three redundant commands per frame, especially on the
         // Firefox build where each GL call crosses the pthread proxy.
         DrawWebBlit(renderColorTexture, drawableWidth, drawableHeight, true, true);
-        if (!g_webMeasurementComplete && ++g_webMeasuredFrames == 600)
+        if (WebMeasurementActive() && ++g_webMeasuredFrames == 600)
         {
             fprintf(stderr,
-                    "th08-web: renderer: 600-frame CPU submission: %.3f ms game + %.3f ms blit per frame; %.1f draws and %.1f vertices\n",
+                    "th08-web: renderer: 600-frame CPU window: %.3f ms avg / %.3f ms max game, %.3f / %.3f ms blit, %.3f / %.3f ms streaming uploads; %.1f flushes, %.1f draws, %.1f vertices per frame\n",
                     g_webGameFlushMilliseconds / g_webMeasuredFrames,
+                    g_webMaximumGameFlushMilliseconds,
                     g_webBlitMilliseconds / g_webMeasuredFrames,
+                    g_webMaximumBlitMilliseconds,
+                    g_webUploadMilliseconds / g_webMeasuredFrames,
+                    g_webMaximumUploadMilliseconds,
+                    static_cast<double>(g_webMeasuredFlushes) / g_webMeasuredFrames,
                     static_cast<double>(g_webMeasuredCommands) / g_webMeasuredFrames,
                     static_cast<double>(g_webMeasuredVertices) / g_webMeasuredFrames);
-            g_webMeasurementComplete = true;
+            if (g_webPresentationDiagnostics)
+                ResetWebMeasurementWindow();
+            else
+                g_webMeasurementComplete = true;
         }
 #else
         glDisable(GL_ALPHA_TEST); glDisable(GL_BLEND); glDisable(GL_CULL_FACE);
@@ -1117,6 +1225,7 @@ class LinuxDevice : public IDirect3DDevice8
                 }
             }, g_webPresentationDiagnostics ? 1 : 0);
         }
+        EndWebFrame();
 #endif
 #ifndef TH08_MODERN_WEB
         glFlush();
@@ -1181,6 +1290,9 @@ class LinuxDevice : public IDirect3DDevice8
     }
     HRESULT BeginScene()
     {
+#ifdef TH08_MODERN_WEB
+        BeginWebFrame();
+#endif
         const bool dialogPresent = th08::g_Gui.IsDialogPresent() != 0;
         if (dialogPresent && !wasDialogPresent)
             CaptureDialogueSnapshot();
@@ -1717,7 +1829,10 @@ class LinuxDevice : public IDirect3DDevice8
         if (fvf & D3DFVF_SPECULAR) offset += 4;
         bool hasTexture = (fvf & D3DFVF_TEXCOUNT_MASK) != 0; UINT textureOffset = offset;
 #ifdef TH08_MODERN_WEB
-        std::vector<WebVertex> vertices(count);
+        WebDrawState state;
+        PrepareWebState(&state);
+        const size_t firstVertex = g_webQueuedVertices.size();
+        g_webQueuedVertices.resize(firstVertex + count);
 #else
         PrepareState(); glBegin(PrimitiveMode(type));
 #endif
@@ -1746,7 +1861,7 @@ class LinuxDevice : public IDirect3DDevice8
             }
 #ifdef TH08_MODERN_WEB
             color = WebVertexCoefficient(color);
-            WebVertex &output = vertices[index];
+            WebVertex &output = g_webQueuedVertices[firstVertex + index];
             // TransformPosition returns D3D's [0, 1] post-transform depth.
             // The desktop path applies an OpenGL projection that negates the
             // submitted 1-2z value; the direct shader has no such matrix, so
@@ -1765,9 +1880,7 @@ class LinuxDevice : public IDirect3DDevice8
 #endif
         }
 #ifdef TH08_MODERN_WEB
-        WebDrawState state;
-        PrepareWebState(&state);
-        return QueueWebVertices(PrimitiveMode(type), &vertices[0], count, state) ? S_OK : E_FAIL;
+        return QueueWebVertexRange(PrimitiveMode(type), firstVertex, count, state) ? S_OK : E_FAIL;
 #else
         glEnd(); return S_OK;
 #endif
