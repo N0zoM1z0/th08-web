@@ -50,6 +50,13 @@ ReplayData *ReplayManager::LoadReplayData(void *data, int fileSize)
     ReplayData *decodedReplay;
     ReplayData *replayData = (ReplayData *)data;
 
+#ifdef TH08_MODERN_PORT
+    if (fileSize < (i32)sizeof(ReplayDataHeader))
+    {
+        goto err1;
+    }
+#endif
+
     if (replayData == NULL)
     {
         goto err1;
@@ -65,6 +72,14 @@ ReplayData *ReplayManager::LoadReplayData(void *data, int fileSize)
         goto err1;
     }
 
+#ifdef TH08_MODERN_PORT
+    if (replayData->header.fileSize < (i32)sizeof(ReplayDataHeader) ||
+        replayData->header.fileSize > fileSize)
+    {
+        goto err1;
+    }
+#endif
+
     obfuscateCursor = (u8 *)&replayData->header.compressedSize;
     obfuscateOffset = replayData->header.value1;
 
@@ -74,6 +89,17 @@ ReplayData *ReplayManager::LoadReplayData(void *data, int fileSize)
         *obfuscateCursor -= obfuscateOffset;
         obfuscateOffset += 7;
     }
+
+#ifdef TH08_MODERN_PORT
+    if (replayData->header.compressedSize < 0 ||
+        replayData->header.decompressedSize < (i32)(sizeof(ReplayData) - sizeof(ReplayDataHeader)) ||
+        replayData->header.compressedSize != replayData->header.fileSize - (i32)sizeof(ReplayDataHeader) ||
+        replayData->header.decompressedSize >
+            0x7fffffff - (i32)sizeof(ReplayDataHeader) - (fileSize - replayData->header.fileSize))
+    {
+        goto err1;
+    }
+#endif
 
     checksumCursor = &replayData->header.value1;
     checksum = REPLAY_OBFUSCATION_VALUE;
@@ -91,15 +117,47 @@ ReplayData *ReplayManager::LoadReplayData(void *data, int fileSize)
     decodedReplay = (ReplayData *)g_ZunMemory.Alloc(replayData->header.decompressedSize + sizeof(ReplayDataHeader) +
                                                     (fileSize - replayData->header.fileSize));
 
+#ifdef TH08_MODERN_PORT
+    if (decodedReplay == NULL)
+    {
+        goto err1;
+    }
+#endif
+
     memcpy(&decodedReplay->header, data, sizeof(ReplayDataHeader));
 
+#ifdef TH08_MODERN_PORT
+    if (Lzss::Decode((u8 *)replayData + sizeof(ReplayDataHeader), replayData->header.compressedSize,
+                     (u8 *)decodedReplay + sizeof(ReplayDataHeader), replayData->header.decompressedSize) == NULL)
+    {
+        goto err2;
+    }
+#else
     Lzss::Decode((u8 *)replayData + sizeof(ReplayDataHeader), replayData->header.compressedSize,
                  (u8 *)decodedReplay + sizeof(ReplayDataHeader), replayData->header.decompressedSize);
+#endif
 
     memcpy((u8 *)decodedReplay + sizeof(ReplayDataHeader) + replayData->header.decompressedSize,
            (u8 *)data + replayData->header.fileSize, fileSize - replayData->header.fileSize);
 
     replayData = decodedReplay;
+
+#ifdef TH08_MODERN_PORT
+    {
+        const u32 decodedSize = sizeof(ReplayDataHeader) + replayData->header.decompressedSize;
+        for (i = 0; i < MAX_STAGES; i++)
+        {
+            const u32 stageOffset = (u32)replayData->header.stageReplayData[i];
+            const u32 fpsOffset = (u32)replayData->header.stageReplayData2[i];
+            if ((stageOffset != 0 &&
+                 (stageOffset < sizeof(ReplayData) || stageOffset > decodedSize - sizeof(StageReplayData))) ||
+                (fpsOffset != 0 && (fpsOffset < sizeof(ReplayData) || fpsOffset >= decodedSize)))
+            {
+                goto err2;
+            }
+        }
+    }
+#endif
 
     if (replayData->gameConfiguration.slowMode != 0)
     {

@@ -167,10 +167,37 @@ ScoreDat *ScoreDat::OpenScore(const char *filename)
         goto recreate_score_file;
     }
 
+#ifdef TH08_MODERN_PORT
+    if (scoreDat->compressedFileSize == 0 ||
+        scoreDat->compressedFileSize > fileSize - sizeof(ScoreDat) ||
+        scoreDat->decompressedFileSize < sizeof(ScoreDat) ||
+        scoreDat->decompressedFileSizeMinusHeader > 0xa0000 ||
+        scoreDat->decompressedFileSizeMinusHeader != scoreDat->decompressedFileSize - sizeof(ScoreDat))
+    {
+        utils::DebugPrint("warning : score.dat compressed size is invalid\r\n");
+        goto recreate_score_file;
+    }
+#endif
+
     scoreDat2 = (ScoreDat *)g_ZunMemory.Alloc(sizeof(ScoreDat) + 0xa0000, "scorefile2");
+#ifdef TH08_MODERN_PORT
+    if (scoreDat2 == NULL)
+    {
+        goto recreate_score_file;
+    }
+#endif
     memcpy(scoreDat2, scoreDat, sizeof(ScoreDat));
+#ifdef TH08_MODERN_PORT
+    if (Lzss::Decode((u8 *)(scoreDat + 1), scoreDat->compressedFileSize, (u8 *)(scoreDat2 + 1),
+                     scoreDat->decompressedFileSizeMinusHeader) == NULL)
+    {
+        g_ZunMemory.Free(scoreDat2);
+        goto recreate_score_file;
+    }
+#else
     Lzss::Decode((u8 *)(scoreDat + 1), scoreDat->compressedFileSize, (u8 *)(scoreDat2 + 1),
                  scoreDat->decompressedFileSizeMinusHeader);
+#endif
     g_ZunMemory.Free(scoreDat);
     scoreDat = scoreDat2;
 
@@ -181,6 +208,13 @@ ScoreDat *ScoreDat::OpenScore(const char *filename)
 
     while (bytesToRead > 0)
     {
+#ifdef TH08_MODERN_PORT
+        if (bytesToRead < (i32)sizeof(Th8k))
+        {
+            utils::DebugPrint("warning : score.dat chapter header is truncated\r\n");
+            goto recreate_score_file;
+        }
+#endif
         if (chapter->magic == TH8K_MAGIC)
         {
             hasFoundTH8K = TRUE;
@@ -200,6 +234,13 @@ ScoreDat *ScoreDat::OpenScore(const char *filename)
             utils::DebugPrint("warning : score.dat chapter size is ZERO\r\n");
             goto recreate_score_file;
         }
+#ifdef TH08_MODERN_PORT
+        if (chapter->th8kLen > bytesToRead)
+        {
+            utils::DebugPrint("warning : score.dat chapter is truncated\r\n");
+            goto recreate_score_file;
+        }
+#endif
         bytesToRead -= chapter->th8kLen;
         chapter = (Th8k *)(((u8 *)chapter) + chapter->th8kLen);
     }

@@ -74,7 +74,11 @@ i32 AnmVm::FUN_0040eb50()
     *reinterpret_cast<i32 *>(reinterpret_cast<u8 *>(this) + 0x324) = 48;
     *reinterpret_cast<f32 *>(reinterpret_cast<u8 *>(this) + 0x320) = 32.0f;
     *reinterpret_cast<f32 *>(reinterpret_cast<u8 *>(this) + 0x314) =
+#ifdef TH08_MODERN_WEB
+        64.0f + (f32)((reinterpret_cast<ZunTimer *>(reinterpret_cast<u8 *>(this) + 0x338)->operator int() & 1) ? 8 : 0);
+#else
         64.0f + (f32)((reinterpret_cast<ZunTimer *>(reinterpret_cast<u8 *>(this) + 0x338)->FUN_0040d3d0() & 1) ? 8 : 0);
+#endif
     *reinterpret_cast<f32 *>(reinterpret_cast<u8 *>(this) + 0x318) = 0.0f;
     return 1;
 }
@@ -238,7 +242,11 @@ void __fastcall FUN_0040c010(Player *player)
         f32 xDelta;
         f32 yDelta;
         PlayerUnkStruct0x40 *slot;
+#ifdef TH08_MODERN_WEB
+        if (bomb->timer == 40)
+#else
         if (bomb->timer.FUN_0040e350(40))
+#endif
         {
             workItem = bomb->workItems;
             for (i = 0; i < 16; i++, workItem++)
