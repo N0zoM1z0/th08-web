@@ -583,7 +583,10 @@ synchronous platform boundaries rather than constitute a free optimization.
 The asset difference suggested a second bounded optimization. TH08 continues
 to expose synchronous Win32-shaped reads to authored code, but after each
 1 MiB sequential BGM fetch the browser starts the next `File.slice()` promise
-without waiting for the cache to empty. The following miss consumes that
+without waiting for the cache to empty. The predicted offset advances by the
+complete authored notification reads that fit in the cache rather than by a
+physical 1 MiB boundary, preserving the short unused tail behavior. The
+following miss consumes that
 prefetched `ArrayBuffer` when available; seeks and prefetch failures retain the
 direct-read fallback. Only one future chunk is held, avoiding TH07's whole-file
 preload cost while removing the normal periodic promise wait from BGM playback.

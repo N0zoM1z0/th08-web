@@ -184,9 +184,14 @@ bool ReadRetailFile(WebFileHandle *handle, void *destination, DWORD size, DWORD 
             const bytes = new Uint8Array(buffer);
             HEAPU8.set(bytes, $2);
             if ($5) {
-                const nextOffset = $1 + bytes.length;
+                // The authored stream consumes fixed notification-sized
+                // reads. If a request does not fit wholly in the current
+                // cache, C++ fetches again and leaves the short tail unused.
+                // Predict that miss rather than the physical end of 1 MiB.
+                const completeReads = Math.floor(bytes.length / $6);
+                const nextOffset = $1 + completeReads * $6;
                 const nextSize = Math.min($3, file.size - nextOffset);
-                if (nextSize > 0) {
+                if (completeReads > 0 && nextSize > 0) {
                     prefetches[$0] = {
                         offset: nextOffset,
                         size: nextSize,
@@ -208,7 +213,7 @@ bool ReadRetailFile(WebFileHandle *handle, void *destination, DWORD size, DWORD 
             finish(-1);
         });
     }, handle->index, handle->position, fetchDestination, fetchSize, &status,
-       useReadAhead ? 1 : 0);
+       useReadAhead ? 1 : 0, requested);
 
     uint32_t *statusAddress = const_cast<uint32_t *>(&status);
     emscripten_atomic_wait_u32(statusAddress, 0, 30000000000LL);

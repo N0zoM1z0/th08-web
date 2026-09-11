@@ -214,7 +214,10 @@ TH07 avoids browser file stalls by preloading its packaged assets, but copying
 TH08's roughly 450 MB BGM archive into Wasm would consume most of the fixed heap
 before gameplay. TH08 instead keeps a bounded two-chunk stream: the authored
 synchronous read consumes one 1 MiB cache while the browser asynchronously
-prefetches the immediately following range. A sequential cache miss normally
+prefetches the next expected cache miss. The lookahead accounts for the
+authored 44,100-byte DirectSound notification reads: it advances by the number
+of complete requests that fit and skips the cache tail that cannot satisfy the
+next request. A sequential cache miss normally
 copies an already-resolved `ArrayBuffer` into shared memory; seeking or a failed
 prefetch falls back to the existing direct Blob range read and restarts the
 lookahead. At most one future range is retained, so the optimization removes
