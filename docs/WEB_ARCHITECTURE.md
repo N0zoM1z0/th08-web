@@ -248,10 +248,17 @@ The native/VC7 path is unchanged, and TH08 does not yet interpolate render
 state between calculations; worker rate remains separately visible so catch-up
 cannot disguise an actual 30--40 Hz presentation bottleneck.
 
-A short Chromium active-gameplay sample recorded 297 browser callbacks and 297
-authored calculation frames in five seconds. The renderer separately measured
-approximately 0.08--0.15 ms of CPU game submission and 0.01--0.03 ms of blit
-work per frame in representative direct-rendering scenes.
+A replay-driven Chromium 150/SwiftShader check measured Stage 5 for 20 seconds
+after a separate 10-second warm-up. Direct presentation recorded 1,200 worker
+callbacks and 1,205 authored calculations (59.99 and 60.24 Hz); forced proxy
+presentation independently recorded the same deltas and rates. Both runs kept
+the same route and player-shot snapshots, produced valid gameplay screenshots,
+and reported no test failure, page crash, or console error. In the dense part
+of the sample the direct renderer submitted approximately 1,900--2,100 vertices
+per frame with about 0.03 ms average streaming-upload CPU time; proxy upload
+averaged approximately 0.19--0.24 ms. Prefetched BGM cache fills normally
+completed in roughly 1--7 ms. These are bounded software-renderer results, not
+a Mac hardware performance claim.
 
 Firefox pacing diagnostics isolate browser rAF, bitmap creation, message
 latency, bitmap presentation, worker callbacks, and authored calculations. In
@@ -456,6 +463,16 @@ All Web builds use
   20 ms. These are bounded software-renderer correctness/pacing observations,
   not a hardware GPU benchmark. Serving the same artifact without isolation
   headers kept Start disabled and displayed the expected COOP/COEP diagnostic.
+- The follow-up performance artifact at commit `93aa518` passed repository
+  validation and the staged-artifact provenance gate in GitHub Actions run
+  `34560049728`. The retained replay test ran the direct and forced-proxy links
+  in clean Chromium 150/SwiftShader contexts. After 10 seconds of Stage 5
+  warm-up, each 20-second sample recorded 1,200 worker callbacks and 1,205
+  authored calculations (59.99 and 60.24 Hz), remained on the expected stage,
+  and had no runtime-test failure or console error. Screenshots showed the
+  background, player, bullets, enemies, HUD, and diagnostic FPS counter. The
+  retail files and replay remained caller-supplied test inputs outside the
+  repository and artifact.
 
 Run the bounded probes with:
 
