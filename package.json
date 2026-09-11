@@ -1,0 +1,11 @@
+{
+  "name": "th08-web-runtime-tests",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:web-runtime": "node scripts/test-web-runtime.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "1.58.2"
+  }
+}

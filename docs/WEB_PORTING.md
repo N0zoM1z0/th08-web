@@ -580,6 +580,17 @@ callbacks on the browser main loop; TH08 must retain pthread execution and
 range-read `thbgm.dat`, so removing `PROXY_TO_PTHREAD` would break existing
 synchronous platform boundaries rather than constitute a free optimization.
 
+The asset difference suggested a second bounded optimization. TH08 continues
+to expose synchronous Win32-shaped reads to authored code, but after each
+1 MiB sequential BGM fetch the browser starts the next `File.slice()` promise
+without waiting for the cache to empty. The following miss consumes that
+prefetched `ArrayBuffer` when available; seeks and prefetch failures retain the
+direct-read fallback. Only one future chunk is held, avoiding TH07's whole-file
+preload cost while removing the normal periodic promise wait from BGM playback.
+`?perf=1` labels every BGM range as direct or prefetched and records the worker
+wait, so this hypothesis remains measurable on macOS rather than being hidden
+inside the FPS counter.
+
 The TH08 Web path now orphans one buffer at the start of each presented frame,
 streams the batched game geometry and final blit into increasing offsets, and
 expands the initial 1 MiB store only when required. It also converts vertices

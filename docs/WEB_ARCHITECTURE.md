@@ -210,6 +210,16 @@ their complete captured draw state is byte-identical. This removes possible
 in-flight overwrite stalls without changing draw order, primitive topology, or
 authored calculation timing.
 
+TH07 avoids browser file stalls by preloading its packaged assets, but copying
+TH08's roughly 450 MB BGM archive into Wasm would consume most of the fixed heap
+before gameplay. TH08 instead keeps a bounded two-chunk stream: the authored
+synchronous read consumes one 1 MiB cache while the browser asynchronously
+prefetches the immediately following range. A sequential cache miss normally
+copies an already-resolved `ArrayBuffer` into shared memory; seeking or a failed
+prefetch falls back to the existing direct Blob range read and restarts the
+lookahead. At most one future range is retained, so the optimization removes
+periodic I/O waits without making the retail archive persistent or bundling it.
+
 `?perf=1` enables presentation diagnostics without changing the default
 release hot path. It measures main-thread animation-frame intervals, bitmap
 creation, worker-to-main message latency, bitmap arrival, and bitmap
@@ -219,7 +229,9 @@ upload time, and average/maximum submission time in repeating windows. A
 visible five-second summary reports browser rAF, worker callback, and authored
 game rates separately. Keeping these clocks separate prevents a nominal
 browser callback rate or the in-game counter from hiding slower simulation
-progress.
+progress. The same diagnostic mode logs every direct or prefetched retail Blob
+read with its byte range and worker wait time, separating I/O stalls from VBO
+submission stalls.
 
 A short Chromium active-gameplay sample recorded 297 browser callbacks and 297
 authored calculation frames in five seconds. The renderer separately measured
@@ -439,6 +451,30 @@ scripts/build-web-data-probe.sh
 scripts/build-web-renderer-probe.sh
 python3 scripts/check-web-provenance.py
 ```
+
+For a replay-driven browser test of the release artifacts, install the pinned
+automation library (it does not download a browser) and pass local retail files
+explicitly:
+
+```bash
+npm ci --ignore-scripts
+npm run test:web-runtime -- \
+  --artifact build/web-dist \
+  --game-data /path/to/th08.dat \
+  --bgm-data /path/to/thbgm.dat \
+  --replay /path/to/replay/th8_03.rpy \
+  --expected-stage 5
+```
+
+The test starts an ephemeral isolated-header server, creates clean browser
+contexts, injects only the named replay into session MEMFS, navigates the
+authored Replay menus, and samples both direct and proxy presentation after a
+separate warm-up. It rejects browser errors, runtime traps, stage mismatches,
+and worker/calculation rates below `--minimum-fps`; screenshots and JSON go to
+an untracked temporary directory unless `--output-dir` is supplied. Chrome is
+auto-detected on macOS and common Linux paths. `--swiftshader --no-sandbox` is
+available for controlled headless environments and should not be used for a
+real-hardware performance claim.
 
 ## Remaining work
 

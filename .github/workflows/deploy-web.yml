@@ -38,7 +38,7 @@ jobs:
 
       - name: Upload branch test bundle
         if: github.ref != 'refs/heads/main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: th08-web-${{ github.sha }}
           path: build/web-dist

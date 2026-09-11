@@ -476,6 +476,7 @@
             presentationModeCodes[presentationMode],
             performanceDiagnosticsEnabled ? 1 : 0,
           );
+          Module._th08_web_configure_io_diagnostics(performanceDiagnosticsEnabled ? 1 : 0);
           startPerformanceReporting();
           Module.FS.chdir("/game");
           Module.FS.writeFile("th08.dat", new Uint8Array(0));
