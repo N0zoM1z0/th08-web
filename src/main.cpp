@@ -100,6 +100,8 @@ DIFFABLE_STATIC(GameWindow, g_GameWindow);
 extern u16 g_GuiMessageInputCurrent;
 static u32 g_WebMainLoopCallbacks;
 static u32 g_WebCalcFrames;
+static f64 g_WebFrameAccumulator;
+static f64 g_WebPreviousTimestamp;
 #endif
 }; // namespace th08
 
@@ -388,6 +390,8 @@ restart:
         g_GameWindow.curTimestamp = g_GameWindow.lastTimestamp;
 
 #ifdef TH08_MODERN_WEB
+        g_WebFrameAccumulator = 0.0;
+        g_WebPreviousTimestamp = g_GameWindow.GetTimestamp();
         // Returning from each callback lets the worker's OffscreenCanvas
         // present its implicit WebGL swap to the browser compositor.
         emscripten_set_main_loop(Th08WebMainLoop, 0, true);
@@ -525,6 +529,73 @@ RenderResult GameWindow::Render()
 {
     i32 calcChainResult;
 
+#ifdef TH08_MODERN_WEB
+    const f64 frameDuration = 1.0 / 60.0;
+    this->curTimestamp = this->GetTimestamp();
+    f64 elapsed = this->curTimestamp - g_WebPreviousTimestamp;
+    g_WebPreviousTimestamp = this->curTimestamp;
+    if (elapsed < 0.0)
+        elapsed = 0.0;
+    if (elapsed > 0.1)
+        elapsed = 0.1;
+    g_WebFrameAccumulator += elapsed;
+
+    if (g_WebFrameAccumulator < frameDuration)
+    {
+        Sleep(0);
+        return RENDER_RESULT_KEEP_RUNNING;
+    }
+
+    g_AnmManager->FlushVertexBuffer();
+    g_Supervisor.viewport.X = 0;
+    g_Supervisor.viewport.Y = 0;
+    g_Supervisor.viewport.Width = GAME_WINDOW_WIDTH;
+    g_Supervisor.viewport.Height = GAME_WINDOW_HEIGHT;
+    g_Supervisor.d3dDevice->SetViewport(&g_Supervisor.viewport);
+
+    bool drawFrame = false;
+    while (g_WebFrameAccumulator >= frameDuration)
+    {
+        calcChainResult = g_Chain.RunCalcChain();
+        g_WebCalcFrames++;
+        g_SoundPlayer.ProcessQueues();
+
+        if (calcChainResult == 0)
+        {
+            g_Supervisor.ThreadClose();
+            return RENDER_RESULT_EXIT_SUCCESS;
+        }
+        if (calcChainResult == -1)
+        {
+            g_Supervisor.ThreadClose();
+            return RENDER_RESULT_EXIT_ERROR;
+        }
+
+        this->framesSinceRedraw++;
+        if (g_Supervisor.cfg.frameskipConfig <= this->framesSinceRedraw)
+        {
+            drawFrame = true;
+            this->framesSinceRedraw = 0;
+        }
+        g_WebFrameAccumulator -= frameDuration;
+    }
+
+    if (drawFrame)
+    {
+        g_Supervisor.d3dDevice->BeginScene();
+        g_AnmManager->ClearVertexBuffer();
+        g_Supervisor.fogState = FOG_UNSET;
+        g_Supervisor.DisableFog();
+        g_Chain.RunDrawChain();
+        g_AnmManager->FlushVertexBuffer();
+        g_Supervisor.d3dDevice->SetTexture(0, NULL);
+        g_Supervisor.d3dDevice->EndScene();
+    }
+
+    this->curTimestamp = this->GetTimestamp();
+    Present();
+    return RENDER_RESULT_KEEP_RUNNING;
+#else
     this->curTimestamp = this->GetTimestamp();
 
     // Safeguard in case of timestamp overflow or other weirdness
@@ -593,6 +664,7 @@ RenderResult GameWindow::Render()
     }
 
     return RENDER_RESULT_KEEP_RUNNING;
+#endif
 }
 
 #pragma var_order(i, snapshotPath)

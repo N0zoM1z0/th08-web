@@ -599,9 +599,17 @@ streams the batched game geometry and final blit into increasing offsets, and
 expands the initial 1 MiB store only when required. It also converts vertices
 directly into the persistent queue and merges only adjacent triangle lists
 whose captured state is identical. The change deliberately does not copy
-TH07's fixed-step interpolation: TH08 lacks the corresponding previous-state
-render model, and adding catch-up calculations would change replay/game timing
-before the renderer bottleneck is isolated.
+TH07's render interpolation because TH08 lacks the corresponding
+previous-state render model.
+
+Repeating diagnostics then observed a proxy case with 60 worker callbacks but
+only about 50--51 authored calculations per second. The original-shaped Web
+timestamp gate ran at most one calculation per callback and discarded missed
+intervals. A Web-only accumulator now keeps 60 Hz authored steps, clamps
+catch-up to 100 ms after long stalls, and renders once after all required
+calculations. This preserves replay frame order and leaves native/VC7 behavior
+untouched. It does not pretend that rendering is 60 Hz: the visible diagnostic
+continues to report browser, worker, and calculation rates separately.
 
 The pinned build script deliberately favors predictable workstation load over
 maximum throughput. Compilation is single-job, and each Docker invocation

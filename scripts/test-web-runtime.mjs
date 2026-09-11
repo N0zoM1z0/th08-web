@@ -245,22 +245,25 @@ async function testMode(browser, baseUrl, options, mode) {
     }
     await page.waitForTimeout(options.warmupSeconds * 1000);
 
-    const frameBefore = await page.evaluate(() => Module._th08_web_get_frame_snapshot() >>> 0);
-    const sampleStarted = Date.now();
+    const sampleBefore = await page.evaluate(() => ({
+      browserTime: performance.now(),
+      frame: Module._th08_web_get_frame_snapshot() >>> 0,
+    }));
     await page.waitForTimeout(options.durationSeconds * 1000);
     const snapshot = await page.evaluate((before) => {
       const after = Module._th08_web_get_frame_snapshot() >>> 0;
       return {
+        browserTime: performance.now(),
         status: document.querySelector("#status").textContent,
         performanceSummary: document.querySelector("#performance").textContent,
         runtimeLog: document.querySelector("#log").textContent,
-        callbackDelta: ((after & 0xffff) - (before & 0xffff)) & 0xffff,
-        calculationDelta: ((after >>> 16) - (before >>> 16)) & 0xffff,
+        callbackDelta: ((after & 0xffff) - (before.frame & 0xffff)) & 0xffff,
+        calculationDelta: ((after >>> 16) - (before.frame >>> 16)) & 0xffff,
         route: Module._th08_web_get_route_snapshot() >>> 0,
         playerShots: Module._th08_web_get_player_shot_snapshot() >>> 0,
       };
-    }, frameBefore);
-    const elapsedSeconds = (Date.now() - sampleStarted) / 1000;
+    }, sampleBefore);
+    const elapsedSeconds = (snapshot.browserTime - sampleBefore.browserTime) / 1000;
     snapshot.callbackRate = snapshot.callbackDelta / elapsedSeconds;
     snapshot.calculationRate = snapshot.calculationDelta / elapsedSeconds;
     snapshot.stage = snapshot.route & 0xf;

@@ -236,6 +236,18 @@ progress. The same diagnostic mode logs every direct or prefetched retail Blob
 read with its byte range and worker wait time, separating I/O stalls from VBO
 submission stalls.
 
+Those separated counters exposed a third boundary in the original-shaped Web
+loop: a proxy sample could receive 60 worker callbacks per second but execute
+only about 50--51 authored calculations. The old timestamp gate performed at
+most one calculation per callback and advanced past missed intervals, so rAF
+jitter or a message callback permanently discarded logical time. The Web-only
+loop now accumulates elapsed time, clamps one callback to 100 ms, executes the
+required 60 Hz calculation steps, and draws/presents once after catch-up. Replay
+input is still consumed once per authored calculation in its original order.
+The native/VC7 path is unchanged, and TH08 does not yet interpolate render
+state between calculations; worker rate remains separately visible so catch-up
+cannot disguise an actual 30--40 Hz presentation bottleneck.
+
 A short Chromium active-gameplay sample recorded 297 browser callbacks and 297
 authored calculation frames in five seconds. The renderer separately measured
 approximately 0.08--0.15 ms of CPU game submission and 0.01--0.03 ms of blit
